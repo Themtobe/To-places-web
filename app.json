@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "TO PLACES",
+    "slug": "to-places-web",
+    "version": "1.0.0",
+    "platforms": ["web", "android"],
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
