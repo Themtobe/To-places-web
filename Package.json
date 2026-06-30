@@ -1,0 +1,17 @@
+{
+  "name": "to-places-web",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "expo start",
+    "build:web": "npx expo export --platform web"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "expo": "~50.0.0",
+    "expo-image-picker": "~14.7.1",
+    "react": "18.2.0",
+    "react-native": "0.73.4",
+    "react-native-web": "~0.19.6"
+  },
+  "private": true
+}
