@@ -24,7 +24,7 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
-  const [authMode, setAuthMode] = useState('LOGIN'); // LOGIN, SIGNUP
+  const [authMode, setAuthMode] = useState('LOGIN'); 
   const [authLoading, setAuthLoading] = useState(false);
   
   const [currentView, setCurrentView] = useState('Feed'); 
@@ -261,7 +261,7 @@ export default function App() {
 
           <TextInput 
             style={styles.field} 
-            placeholder="Email Vector Address" 
+            placeholder="Email Address" 
             placeholderTextColor="#8E8E8A" 
             value={authEmail} 
             onChangeText={setAuthEmail} 
@@ -270,7 +270,7 @@ export default function App() {
           />
           <TextInput 
             style={styles.field} 
-            placeholder="Secure Password Access Code" 
+            placeholder="Password" 
             placeholderTextColor="#8E8E8A" 
             secureTextEntry 
             value={authPassword} 
@@ -281,13 +281,13 @@ export default function App() {
             <ActivityIndicator size="small" color="#FFD700" style={{ marginVertical: 20 }} />
           ) : (
             <TouchableOpacity style={styles.primaryAuthBtn} onPress={handleAuthentication}>
-              <Text style={styles.btnText}>{authMode === 'LOGIN' ? 'Sign In Engine' : 'Initialize Account'}</Text>
+              <Text style={styles.btnText}>{authMode === 'LOGIN' ? 'Log In' : 'Register Account'}</Text>
             </TouchableOpacity>
           )}
 
           <TouchableOpacity onPress={() => setAuthMode(authMode === 'LOGIN' ? 'SIGNUP' : 'LOGIN')}>
             <Text style={styles.toggleAuthText}>
-              {authMode === 'LOGIN' ? "Don't have an account? Connect here" : 'Already have a secure key? Log In'}
+              {authMode === 'LOGIN' ? "Don't have an account? Register here" : 'Already have an account? Log In'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -357,7 +357,7 @@ export default function App() {
             </SafeAreaView>
           </Modal>
 
-          {/* TABS CONTROLLER: FEED */}
+          {/* FEED VIEW */}
           {currentView === 'Feed' && (
             <View style={{ flex: 1 }}>
               <View style={styles.appBar}>
@@ -388,7 +388,6 @@ export default function App() {
                           <Text style={styles.greyText}>{log.handle}</Text>
                         </View>
                       </View>
-                      <Text style={styles.contentText}/></Text>
                       <Text style={styles.contentText}>{log.content}</Text>
                       {log.media && <Image source={{ uri: log.media }} style={styles.postMedia} resizeMode="cover" />}
                       
