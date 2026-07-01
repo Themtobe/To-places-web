@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 
 // --- CLOUD INFRASTRUCTURE LINK ---
 const SUPABASE_URL = 'https://dgeewroyceocxsedllxl.supabase.co'; 
-const SUPABASE_ANON_KEY = 'https://dd6c6403-8584-42a5-a4da-99aae0dafa13-00-hj3bqmi0t6iv.janeway.replit.dev';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRnZWV3cm95Y2VvY3hzZWRsbHhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkzOTg4MjcsImV4cCI6MjA5NDk3NDgyN30.4MvtwxbQ4jE_zNJTWyfObbKIxlV8svHq6sqKJzavFVY';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 export default function App() {
