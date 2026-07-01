@@ -24,12 +24,11 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
-  const [authUsername, setAuthUsername] = useState('');
   const [authMode, setAuthMode] = useState('LOGIN'); // LOGIN, SIGNUP
   const [authLoading, setAuthLoading] = useState(false);
   
-  const [currentView, setCurrentView] = useState('Feed'); // Feed, Discover, Profile
-  const [feedTab, setFeedTab] = useState('All'); // All, Matches, Friends
+  const [currentView, setCurrentView] = useState('Feed'); 
+  const [feedTab, setFeedTab] = useState('All'); 
   const [isComposeVisible, setIsComposeVisible] = useState(false);
   const [isEditProfileVisible, setIsEditProfileVisible] = useState(false);
   const [feedLoading, setFeedLoading] = useState(false);
@@ -114,7 +113,7 @@ export default function App() {
         statusTag: post.profiles?.status || 'Connection',
         content: post.content,
         media: post.media_url,
-        likes: Math.floor(Math.random() * 45) + 3 // Dopamine loop generation simulation
+        likes: Math.floor(Math.random() * 45) + 3 
       })));
     }
     setFeedLoading(false);
@@ -180,16 +179,17 @@ export default function App() {
 
   // --- USER CORE INTERACTION FLOWS ---
   const handleAuthentication = async () => {
-    if (!authEmail || !authPassword || (authMode === 'SIGNUP' && !authUsername)) {
-      Alert.alert('Verification Halt', 'All mandatory credentials must be structuralized.');
+    if (!authEmail || !authPassword) {
+      Alert.alert('Verification Halt', 'All fields are required.');
       return;
     }
     setAuthLoading(true);
     if (authMode === 'SIGNUP') {
+      const generatedUsername = authEmail.split('@')[0];
       const { data, error } = await supabase.auth.signUp({ 
         email: authEmail, 
         password: authPassword,
-        options: { data: { username: authUsername, full_name: authUsername } }
+        options: { data: { username: generatedUsername, full_name: generatedUsername } }
       });
       if (error) {
         Alert.alert('Registration Error', error.message);
@@ -250,20 +250,32 @@ export default function App() {
     );
   };
 
-  // --- MANDATORY WALL: FORCE LOGIN BEFORE SEEING CORE SCREENS ---
+  // --- LOG-IN GATE ---
   if (!session) {
     return (
       <SafeAreaView style={styles.authContainer}>
         <View style={styles.authCard}>
           <Text style={styles.mainTitle}>TO <Text style={{color: '#FFD700'}}>PLACES</Text></Text>
-          <Text style={styles.tagline}>Connect. Chat. Meet. Date.</Text>
-
-          {authMode === 'SIGNUP' && (
-            <TextInput style={styles.field} placeholder="Username" placeholderTextColor="#8E8E8A" value={authUsername} onChangeText={authUsername} autoCapitalize="none" />
-          )}
           
-          <TextInput style={styles.field} placeholder="Email Vector Address" placeholderTextColor="#8E8E8A" value={authEmail} onChangeText={setAuthEmail} autoCapitalize="none" keyboardType="email-address" />
-          <TextInput style={styles.field} placeholder="Secure Password Access Code" placeholderTextColor="#8E8E8A" secureTextEntry value={authPassword} onChangeText={setAuthPassword} />
+          <View style={{ height: 20 }} />
+
+          <TextInput 
+            style={styles.field} 
+            placeholder="Email Vector Address" 
+            placeholderTextColor="#8E8E8A" 
+            value={authEmail} 
+            onChangeText={setAuthEmail} 
+            autoCapitalize="none" 
+            keyboardType="email-address" 
+          />
+          <TextInput 
+            style={styles.field} 
+            placeholder="Secure Password Access Code" 
+            placeholderTextColor="#8E8E8A" 
+            secureTextEntry 
+            value={authPassword} 
+            onChangeText={setAuthPassword} 
+          />
 
           {authLoading ? (
             <ActivityIndicator size="small" color="#FFD700" style={{ marginVertical: 20 }} />
@@ -289,7 +301,7 @@ export default function App() {
         
         <View style={styles.workspace}>
           
-          {/* INTERACTIVE MEDIA & ROUTE LOG INJECTOR MODAL */}
+          {/* POST COMPOSER */}
           <Modal visible={isComposeVisible} animationType="slide">
             <SafeAreaView style={styles.sheet}>
               <View style={styles.sheetHeader}>
@@ -312,7 +324,7 @@ export default function App() {
             </SafeAreaView>
           </Modal>
 
-          {/* COMPREHENSIVE CONFIGURATION INTERFACE */}
+          {/* EDIT PROFILE */}
           <Modal visible={isEditProfileVisible} animationType="fade">
             <SafeAreaView style={styles.sheet}>
               <View style={styles.sheetHeader}>
@@ -345,7 +357,7 @@ export default function App() {
             </SafeAreaView>
           </Modal>
 
-          {/* VIEW CONTROLLER VECTOR 1: GLOBAL & MATCH FEED */}
+          {/* TABS CONTROLLER: FEED */}
           {currentView === 'Feed' && (
             <View style={{ flex: 1 }}>
               <View style={styles.appBar}>
@@ -376,6 +388,7 @@ export default function App() {
                           <Text style={styles.greyText}>{log.handle}</Text>
                         </View>
                       </View>
+                      <Text style={styles.contentText}/></Text>
                       <Text style={styles.contentText}>{log.content}</Text>
                       {log.media && <Image source={{ uri: log.media }} style={styles.postMedia} resizeMode="cover" />}
                       
@@ -390,7 +403,7 @@ export default function App() {
             </View>
           )}
 
-          {/* VIEW CONTROLLER VECTOR 2: GAMIFIED SEARCH AND DISCOVER MATCHES */}
+          {/* RADAR DISCOVER */}
           {currentView === 'Discover' && (
             <View style={{ flex: 1 }}>
               <View style={styles.appBar}><Text style={styles.logo}>RADAR <Text style={{color: '#FFD700'}}>DISCOVER</Text></Text></View>
@@ -403,7 +416,7 @@ export default function App() {
                     <View style={[styles.badgeLabelContainer, {marginVertical: 4}]}><Text style={styles.badgeTextLayout}>{user.status || 'Active Explorer'}</Text></View>
                     <Text style={[styles.greyText, { textAlign: 'center', height: 40 }]} numberOfLines={2}>{user.bio || 'No status descriptor cataloged.'}</Text>
                     <View style={styles.cardButtonRow}>
-                      <TouchableOpacity style={styles.waveBtn} onPress={() => Alert.alert('Connection Made', 'Spark transmitted! Notification queued.')}>
+                      <TouchableOpacity style={styles.waveBtn} onPress={() => Alert.alert('Connection Made', 'Spark transmitted!')}>
                         <Text style={styles.btnText}>⚡ Connect</Text>
                       </TouchableOpacity>
                     </View>
@@ -413,7 +426,7 @@ export default function App() {
             </View>
           )}
 
-          {/* VIEW CONTROLLER VECTOR 3: SOCIAL PROFILE CONTROLLER INTERFACE */}
+          {/* PROFILE HUBS */}
           {currentView === 'Profile' && (
             <View style={{ flex: 1 }}>
               <View style={styles.appBar}>
@@ -437,7 +450,7 @@ export default function App() {
             </View>
           )}
 
-          {/* BOTTOM PERSISTENT TRAY TAB BAR ENGINE */}
+          {/* BOTTOM TABS CONTROLLER */}
           <View style={styles.bottomNav}>
             <TouchableOpacity style={styles.navBtn} onPress={() => setCurrentView('Feed')}><Text style={[styles.navText, currentView === 'Feed' && { color: '#FFD700' }]}>🎴 Feed</Text></TouchableOpacity>
             <TouchableOpacity style={styles.navBtn} onPress={() => setCurrentView('Discover')}><Text style={[styles.navText, currentView === 'Discover' && { color: '#FFD700' }]}>⚡ Radar</Text></TouchableOpacity>
@@ -455,7 +468,6 @@ const styles = StyleSheet.create({
   authContainer: { flex: 1, backgroundColor: '#0D0D0C', justifyContent: 'center', alignItems: 'center' },
   authCard: { width: '85%', padding: 24, backgroundColor: '#1A1A18', borderRadius: 16, borderWidth: 1, borderColor: '#262624', alignItems: 'center' },
   mainTitle: { color: '#FFFFFF', fontSize: 32, fontWeight: '900', letterSpacing: 2 },
-  tagline: { color: '#8E8E8A', fontSize: 14, marginVertical: 8, fontWeight: '600' },
   primaryAuthBtn: { backgroundColor: '#FFD700', width: '100%', padding: 14, borderRadius: 12, alignItems: 'center', marginTop: 16 },
   toggleAuthText: { color: '#00B074', marginTop: 16, fontWeight: '700', fontSize: 13 },
   
