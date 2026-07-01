@@ -4,8 +4,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { createClient } from '@supabase/supabase-js';
 
 // --- CLOUD INFRASTRUCTURE LINK ---
-const SUPABASE_URL = 'YOUR_SUPABASE_URL'; 
-const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+const SUPABASE_URL = 'https://dgeewroyceocxsedllxl.supabase.co'; 
+const SUPABASE_ANON_KEY = 'https://dd6c6403-8584-42a5-a4da-99aae0dafa13-00-hj3bqmi0t6iv.janeway.replit.dev';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 export default function App() {
