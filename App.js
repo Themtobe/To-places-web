@@ -27,8 +27,7 @@ export default function App() {
   const [authMode, setAuthMode] = useState('LOGIN'); 
   const [authLoading, setAuthLoading] = useState(false);
   
-  const [currentView, setCurrentView] = useState('Feed'); 
-  const [feedTab, setFeedTab] = useState('All'); 
+  const [currentView, setCurrentView] = useState('Feed'); // Feed, Discovery, Inbox, Profile
   const [isComposeVisible, setIsComposeVisible] = useState(false);
   const [isEditProfileVisible, setIsEditProfileVisible] = useState(false);
   const [feedLoading, setFeedLoading] = useState(false);
@@ -39,18 +38,22 @@ export default function App() {
   const [logs, setLogs] = useState([]);
   const [discoverUsers, setDiscoverUsers] = useState([]);
 
+  // --- INBOX SYSTEM VARIABLES ---
+  const [activeChatUser, setActiveChatUser] = useState(null);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [typedMessage, setTypedMessage] = useState('');
+  const [inboxLoading, setInboxLoading] = useState(false);
+
   const [userProfile, setUserProfile] = useState({
     id: '',
     name: 'Explorer',
     handle: '@user',
-    bio: 'Mapping structural systems and documenting route networks.',
-    avatar: '', 
-    status: 'Looking for Friends'
+    bio: 'Documenting structural networks and experiences.',
+    avatar: ''
   });
   
   const [inputName, setInputName] = useState('');
   const [inputBio, setInputBio] = useState('');
-  const [inputStatus, setInputStatus] = useState('Looking for Friends');
 
   // --- LIFECYCLE SYNC OPERATIONS ---
   useEffect(() => {
@@ -64,7 +67,7 @@ export default function App() {
       if (session) {
         fetchUserProfile(session.user.id);
       } else {
-        setUserProfile({ id: '', name: 'Explorer', handle: '@user', bio: '', avatar: '', status: '' });
+        setUserProfile({ id: '', name: 'Explorer', handle: '@user', bio: '', avatar: '' });
       }
     });
 
@@ -73,10 +76,29 @@ export default function App() {
 
   useEffect(() => {
     if (session) {
-      fetchCloudTimeline();
-      fetchDiscoverIndex();
+      if (currentView === 'Feed') fetchCloudTimeline();
+      if (currentView === 'Discovery') fetchDiscoverIndex();
+      if (currentView === 'Inbox' && !activeChatUser) fetchDiscoverIndex();
     }
-  }, [session, feedTab]);
+  }, [session, currentView]);
+
+  // Real-time Message Streamer Sync
+  useEffect(() => {
+    if (!session || !activeChatUser) return;
+
+    fetchChatHistory();
+
+    const channel = supabase
+      .channel('realtime-messages')
+      .on('postgres_changes', { event: 'INSERT', scheme: 'public', table: 'messages' }, () => {
+        fetchChatHistory();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeChatUser, session]);
 
   const fetchUserProfile = async (userId) => {
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
@@ -86,23 +108,20 @@ export default function App() {
         name: data.full_name || 'EXPLORER',
         handle: `@${data.username || 'user'}`,
         bio: data.bio || '',
-        avatar: data.avatar_url || '',
-        status: data.status || 'Looking for Friends'
+        avatar: data.avatar_url || ''
       });
       setInputName(data.full_name || '');
       setInputBio(data.bio || '');
-      setInputStatus(data.status || 'Looking for Friends');
     }
   };
 
   const fetchCloudTimeline = async () => {
     setFeedLoading(true);
-    let query = supabase
+    const { data } = await supabase
       .from('posts')
-      .select('id, content, media_url, created_at, user_id, profiles ( id, full_name, username, avatar_url, status )')
+      .select('id, content, media_url, created_at, user_id, profiles ( id, full_name, username, avatar_url )')
       .order('created_at', { ascending: false });
 
-    const { data } = await query;
     if (data) {
       setLogs(data.map(post => ({
         id: post.id,
@@ -110,7 +129,6 @@ export default function App() {
         user: post.profiles?.full_name || 'EXPLORER',
         handle: `@${post.profiles?.username || 'user'}`,
         avatar: post.profiles?.avatar_url || '',
-        statusTag: post.profiles?.status || 'Connection',
         content: post.content,
         media: post.media_url,
         likes: Math.floor(Math.random() * 45) + 3 
@@ -125,8 +143,18 @@ export default function App() {
       .from('profiles')
       .select('*')
       .neq('id', session.user.id)
-      .limit(10);
+      .limit(20);
     if (data) setDiscoverUsers(data);
+  };
+
+  const fetchChatHistory = async () => {
+    if (!session || !activeChatUser) return;
+    const { data } = await supabase
+      .from('messages')
+      .select('*')
+      .or(`and(sender_id.eq.${session.user.id},receiver_id.eq.${activeChatUser.id}),and(sender_id.eq.${activeChatUser.id},receiver_id.eq.${session.user.id})`)
+      .order('created_at', { ascending: true });
+    if (data) setChatMessages(data);
   };
 
   // --- HARDWARE CAMERA & IMAGE SELECTION HANDLERS ---
@@ -135,8 +163,8 @@ export default function App() {
       'Upload Media',
       'Choose an acquisition vector:',
       [
-        { text: '📷 Take Photo', onPress: () => launchHardwareCamera(target) },
-        { text: '🖼️ Choose from Gallery', onPress: () => launchMediaLibrary(target) },
+        { text: '📷 Take Live Photo', onPress: () => launchHardwareCamera(target) },
+        { text: '🖼️ Open Gallery Library', onPress: () => launchMediaLibrary(target) },
         { text: 'Cancel', style: 'cancel' }
       ]
     );
@@ -145,35 +173,44 @@ export default function App() {
   const launchHardwareCamera = async (target) => {
     const permissions = await ImagePicker.requestCameraPermissionsAsync();
     if (!permissions.granted) {
-      Alert.alert('Access Denied', 'Camera operations require structural permission confirmation.');
+      Alert.alert('Access Denied', 'Camera execution permissions required.');
       return;
     }
-    let result = await ImagePicker.launchCameraAsync({ quality: 0.7, allowsEditing: true, aspect: [1, 1] });
+    let result = await ImagePicker.launchCameraAsync({ quality: 0.6, allowsEditing: true, aspect: [4, 3], base64: true });
     if (!result.canceled) {
-      processSelectedImage(result.assets[0].uri, target);
+      const base64Url = `data:image/jpeg;base64,${result.assets[0].base64}`;
+      processSelectedImage(base64Url, target);
     }
   };
 
   const launchMediaLibrary = async (target) => {
     const permissions = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permissions.granted) {
-      Alert.alert('Access Denied', 'Gallery access permissions required.');
+      Alert.alert('Access Denied', 'Gallery context permissions required.');
       return;
     }
-    let result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7, allowsEditing: true, aspect: [1, 1] });
+    let result = await ImagePicker.launchImageLibraryAsync({ quality: 0.6, allowsEditing: true, aspect: [4, 3], base64: true });
     if (!result.canceled) {
-      processSelectedImage(result.assets[0].uri, target);
+      const base64Url = `data:image/jpeg;base64,${result.assets[0].base64}`;
+      processSelectedImage(base64Url, target);
     }
   };
 
-  const processSelectedImage = async (uri, target) => {
+  const processSelectedImage = async (base64Data, target) => {
     if (target === 'POST') {
-      setAttachedMedia(uri);
+      setAttachedMedia(base64Data);
     } else if (target === 'PROFILE') {
-      setUserProfile(prev => ({ ...prev, avatar: uri }));
-      if (session) {
-        await supabase.from('profiles').update({ avatar_url: uri }).eq('id', session.user.id);
-      }
+      setUserProfile(prev => ({ ...prev, avatar: base64Data }));
+      await supabase.from('profiles').update({ avatar_url: base64Data }).eq('id', session.user.id);
+    } else if (target === 'CHAT') {
+      // Instant image transmit configuration inside text channels
+      await supabase.from('messages').insert([{
+        sender_id: session.user.id,
+        receiver_id: activeChatUser.id,
+        content: '📷 Sent a photo',
+        media_url: base64Data
+      }]);
+      fetchChatHistory();
     }
   };
 
@@ -186,7 +223,7 @@ export default function App() {
     setAuthLoading(true);
     if (authMode === 'SIGNUP') {
       const generatedUsername = authEmail.split('@')[0];
-      const { data, error } = await supabase.auth.signUp({ 
+      const { error } = await supabase.auth.signUp({ 
         email: authEmail, 
         password: authPassword,
         options: { data: { username: generatedUsername, full_name: generatedUsername } }
@@ -227,14 +264,30 @@ export default function App() {
   const saveProfileChanges = async () => {
     const { error } = await supabase
       .from('profiles')
-      .update({ full_name: inputName, bio: inputBio, status: inputStatus })
+      .update({ full_name: inputName, bio: inputBio })
       .eq('id', session.user.id);
 
     if (!error) {
-      setUserProfile(prev => ({ ...prev, name: inputName, bio: inputBio, status: inputStatus }));
+      setUserProfile(prev => ({ ...prev, name: inputName, bio: inputBio }));
       setIsEditProfileVisible(false);
     } else {
       Alert.alert('Update Failure', error.message);
+    }
+  };
+
+  const handleSendTextMessage = async () => {
+    if (typedMessage.trim() === '') return;
+    const { error } = await supabase
+      .from('messages')
+      .insert([{
+        sender_id: session.user.id,
+        receiver_id: activeChatUser.id,
+        content: typedMessage
+      }]);
+
+    if (!error) {
+      setTypedMessage('');
+      fetchChatHistory();
     }
   };
 
@@ -256,26 +309,10 @@ export default function App() {
       <SafeAreaView style={styles.authContainer}>
         <View style={styles.authCard}>
           <Text style={styles.mainTitle}>TO <Text style={{color: '#FFD700'}}>PLACES</Text></Text>
-          
           <View style={{ height: 20 }} />
 
-          <TextInput 
-            style={styles.field} 
-            placeholder="Email Address" 
-            placeholderTextColor="#8E8E8A" 
-            value={authEmail} 
-            onChangeText={setAuthEmail} 
-            autoCapitalize="none" 
-            keyboardType="email-address" 
-          />
-          <TextInput 
-            style={styles.field} 
-            placeholder="Password" 
-            placeholderTextColor="#8E8E8A" 
-            secureTextEntry 
-            value={authPassword} 
-            onChangeText={setAuthPassword} 
-          />
+          <TextInput style={styles.field} placeholder="Email Address" placeholderTextColor="#8E8E8A" value={authEmail} onChangeText={setAuthEmail} autoCapitalize="none" keyboardType="email-address" />
+          <TextInput style={styles.field} placeholder="Password" placeholderTextColor="#8E8E8A" secureTextEntry value={authPassword} onChangeText={setAuthPassword} />
 
           {authLoading ? (
             <ActivityIndicator size="small" color="#FFD700" style={{ marginVertical: 20 }} />
@@ -298,7 +335,6 @@ export default function App() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={{ flex: 1, flexDirection: isDesktop ? 'row' : 'column' }}>
-        
         <View style={styles.workspace}>
           
           {/* POST COMPOSER */}
@@ -310,7 +346,7 @@ export default function App() {
               </View>
               <View style={styles.composeInputLayout}>
                 {renderAvatar(userProfile.avatar, userProfile.name, styles.avatarMini)}
-                <TextInput style={styles.inputArea} placeholder="Share where you are or who you are looking to meet..." placeholderTextColor="#8E8E8A" multiline autoFocus value={newPostText} onChangeText={setNewPostText} />
+                <TextInput style={styles.inputArea} placeholder="Share anything, update friends, upload photos..." placeholderTextColor="#8E8E8A" multiline autoFocus value={newPostText} onChangeText={setNewPostText} />
               </View>
               {attachedMedia && (
                 <View style={styles.mediaContainer}>
@@ -319,7 +355,7 @@ export default function App() {
                 </View>
               )}
               <TouchableOpacity style={styles.mediaTray} onPress={() => pickImageHandler('POST')}>
-                <Text style={styles.mediaTrayText}>📸 Attach Live Snapshot / Capture</Text>
+                <Text style={styles.mediaTrayText}>📸 Attach / Capture Live Photo</Text>
               </TouchableOpacity>
             </SafeAreaView>
           </Modal>
@@ -341,37 +377,48 @@ export default function App() {
 
                 <Text style={styles.label}>DISPLAY HANDLE RECOGNITION NAME</Text>
                 <TextInput style={styles.field} value={inputName} onChangeText={setInputName} placeholderTextColor="#8E8E8A" />
-                
-                <Text style={styles.label}>DATING & SOCIAL MATRIX GOAL</Text>
-                <View style={styles.statusRowPick}>
-                  {['Looking for Friends', 'Dating', 'Just Chatting'].map(st => (
-                    <TouchableOpacity key={st} style={[styles.statusSelectChip, inputStatus === st && styles.statusSelectChipActive]} onPress={() => setInputStatus(st)}>
-                      <Text style={[styles.chipTxt, inputStatus === st && {color: '#0D0D0C'}]}>{st}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
 
                 <Text style={styles.label}>METADATA BIO DESCRIPTION</Text>
-                <TextInput style={[styles.field, { height: 80 }]} value={inputBio} onChangeText={setInputBio} placeholderTextColor="#8E8E8A" multiline />
+                <TextInput style={[styles.field, { height: 120 }]} value={inputBio} onChangeText={setInputBio} placeholderTextColor="#8E8E8A" multiline />
               </ScrollView>
             </SafeAreaView>
           </Modal>
 
-          {/* FEED VIEW */}
+          {/* CHAT INBOX DRAWER INTERFACE */}
+          <Modal visible={activeChatUser !== null} animationType="slide">
+            <SafeAreaView style={styles.sheet}>
+              <View style={styles.sheetHeader}>
+                <TouchableOpacity onPress={() => setActiveChatUser(null)}><Text style={styles.goldActionText}>✕ Close</Text></TouchableOpacity>
+                <Text style={styles.whiteBold}>{activeChatUser?.full_name}</Text>
+                <TouchableOpacity onPress={() => pickImageHandler('CHAT')}><Text style={styles.mediaTrayText}>📷 Send Pic</Text></TouchableOpacity>
+              </View>
+              
+              <ScrollView style={{ flex: 1, padding: 16 }}>
+                {chatMessages.map(msg => {
+                  const isMe = msg.sender_id === session.user.id;
+                  return (
+                    <View key={msg.id} style={[styles.msgBubble, isMe ? styles.msgMe : styles.msgThem]}>
+                      <Text style={{ color: '#FFFFFF' }}>{msg.content}</Text>
+                      {msg.media_url && <Image source={{ uri: msg.media_url }} style={styles.chatMediaImg} />}
+                    </View>
+                  );
+                })}
+              </ScrollView>
+
+              <View style={styles.chatInputLayout}>
+                <TextInput style={styles.chatTextInput} placeholder="Type secure chat transmission..." placeholderTextColor="#8E8E8A" value={typedMessage} onChangeText={setTypedMessage} />
+                <TouchableOpacity style={styles.chatSendBtn} onPress={handleSendTextMessage}><Text style={styles.btnText}>Send</Text></TouchableOpacity>
+              </View>
+            </SafeAreaView>
+          </Modal>
+
+          {/* TIMELINE FEED */}
           {currentView === 'Feed' && (
             <View style={{ flex: 1 }}>
               <View style={styles.appBar}>
                 <Text style={styles.logo}>TO <Text style={{color: '#FFD700'}}>PLACES</Text></Text>
                 <TouchableOpacity style={styles.greenActionBtn} onPress={() => setIsComposeVisible(true)}><Text style={styles.btnText}>+ Post</Text></TouchableOpacity>
               </View>
-              <View style={styles.tabs}>
-                {['All', 'Matches', 'Friends'].map(tab => (
-                  <TouchableOpacity key={tab} style={[styles.tab, feedTab === tab && styles.tabActive]} onPress={() => setFeedTab(tab)}>
-                    <Text style={[styles.tabText, feedTab === tab && styles.tabTextActive]}>{tab}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              
               {feedLoading ? (
                 <View style={styles.center}><ActivityIndicator size="large" color="#FFD700" /></View>
               ) : (
@@ -381,20 +428,12 @@ export default function App() {
                       <View style={styles.postHeader}>
                         {renderAvatar(log.avatar, log.user)}
                         <View style={{ marginLeft: 10, flex: 1 }}>
-                          <View style={{flexDirection: 'row', justifyContent: 'space-between'}}>
-                            <Text style={styles.whiteBold}>{log.user}</Text>
-                            <View style={styles.badgeLabelContainer}><Text style={styles.badgeTextLayout}>{log.statusTag}</Text></View>
-                          </View>
+                          <Text style={styles.whiteBold}>{log.user}</Text>
                           <Text style={styles.greyText}>{log.handle}</Text>
                         </View>
                       </View>
                       <Text style={styles.contentText}>{log.content}</Text>
                       {log.media && <Image source={{ uri: log.media }} style={styles.postMedia} resizeMode="cover" />}
-                      
-                      <View style={styles.actionRow}>
-                        <TouchableOpacity style={styles.interactiveActionClick}><Text style={styles.actionLink}>🔥 Flame ({log.likes})</Text></TouchableOpacity>
-                        <TouchableOpacity style={styles.interactiveActionClick}><Text style={styles.actionLink}>💬 Chat Connection</Text></TouchableOpacity>
-                      </View>
                     </View>
                   ))}
                 </ScrollView>
@@ -402,30 +441,42 @@ export default function App() {
             </View>
           )}
 
-          {/* RADAR DISCOVER */}
-          {currentView === 'Discover' && (
+          {/* DISCOVERY VIEW (RENAME MATRIX) */}
+          {currentView === 'Discovery' && (
             <View style={{ flex: 1 }}>
-              <View style={styles.appBar}><Text style={styles.logo}>RADAR <Text style={{color: '#FFD700'}}>DISCOVER</Text></Text></View>
+              <View style={styles.appBar}><Text style={styles.logo}>DISCOVERY <Text style={{color: '#FFD700'}}>INDEX</Text></Text></View>
               <ScrollView style={{ padding: 12 }}>
-                <Text style={styles.sectionHeader}>PEOPLE NEAR YOUR ROUTE NETWORK</Text>
                 {discoverUsers.map(user => (
                   <View key={user.id} style={styles.discoverUserCard}>
                     {renderAvatar(user.avatar_url, user.full_name, styles.avatarLarge)}
                     <Text style={[styles.whiteBold, { marginTop: 10, fontSize: 16 }]}>{user.full_name || 'Anonymous'}</Text>
-                    <View style={[styles.badgeLabelContainer, {marginVertical: 4}]}><Text style={styles.badgeTextLayout}>{user.status || 'Active Explorer'}</Text></View>
-                    <Text style={[styles.greyText, { textAlign: 'center', height: 40 }]} numberOfLines={2}>{user.bio || 'No status descriptor cataloged.'}</Text>
-                    <View style={styles.cardButtonRow}>
-                      <TouchableOpacity style={styles.waveBtn} onPress={() => Alert.alert('Connection Made', 'Spark transmitted!')}>
-                        <Text style={styles.btnText}>⚡ Connect</Text>
-                      </TouchableOpacity>
-                    </View>
+                    <Text style={[styles.greyText, { textAlign: 'center', marginTop: 6 }]} numberOfLines={2}>{user.bio || 'No profile descriptor cataloged.'}</Text>
                   </View>
                 ))}
               </ScrollView>
             </View>
           )}
 
-          {/* PROFILE HUBS */}
+          {/* GLOBAL INBOX CHANNEL */}
+          {currentView === 'Inbox' && (
+            <View style={{ flex: 1 }}>
+              <View style={styles.appBar}><Text style={styles.logo}>SECURE <Text style={{color: '#FFD700'}}>INBOX</Text></Text></View>
+              <ScrollView style={{ flex: 1 }}>
+                <Text style={styles.sectionHeader}>TAP ON A PROFILE TO INITIATE CHAT CONNECTION</Text>
+                {discoverUsers.map(user => (
+                  <TouchableOpacity key={user.id} style={styles.inboxUserRow} onPress={() => setActiveChatUser(user)}>
+                    {renderAvatar(user.avatar_url, user.full_name, styles.avatarMini)}
+                    <View style={{ marginLeft: 14 }}>
+                      <Text style={styles.whiteBold}>{user.full_name || 'Network User'}</Text>
+                      <Text style={styles.greyText}>Click to connect & send images</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+
+          {/* PROFILE CONNECTOR HUBS */}
           {currentView === 'Profile' && (
             <View style={{ flex: 1 }}>
               <View style={styles.appBar}>
@@ -438,21 +489,17 @@ export default function App() {
                 </TouchableOpacity>
                 <Text style={[styles.whiteBold, { fontSize: 22, marginTop: 12 }]}>{userProfile.name}</Text>
                 <Text style={styles.greyText}>{userProfile.handle}</Text>
-                
-                <View style={[styles.badgeLabelContainer, {marginTop: 6, backgroundColor: '#00B074'}]}>
-                  <Text style={[styles.badgeTextLayout, {color: '#FFFFFF'}]}>{userProfile.status}</Text>
-                </View>
-
-                <Text style={styles.bioText}>{userProfile.bio || "No profile bio indexed yet. Tap configuration update interface below."}</Text>
+                <Text style={styles.bioText}>{userProfile.bio || "No profile bio description setup yet."}</Text>
                 <TouchableOpacity style={styles.editBtn} onPress={() => setIsEditProfileVisible(true)}><Text style={styles.whiteBold}>Configure Profile / Photo</Text></TouchableOpacity>
               </View>
             </View>
           )}
 
-          {/* BOTTOM TABS CONTROLLER */}
+          {/* BOTTOM GLOBAL APP NAVIGATION */}
           <View style={styles.bottomNav}>
             <TouchableOpacity style={styles.navBtn} onPress={() => setCurrentView('Feed')}><Text style={[styles.navText, currentView === 'Feed' && { color: '#FFD700' }]}>🎴 Feed</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.navBtn} onPress={() => setCurrentView('Discover')}><Text style={[styles.navText, currentView === 'Discover' && { color: '#FFD700' }]}>⚡ Radar</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.navBtn} onPress={() => setCurrentView('Discovery')}><Text style={[styles.navText, currentView === 'Discovery' && { color: '#FFD700' }]}>⚡ Discovery</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.navBtn} onPress={() => setCurrentView('Inbox')}><Text style={[styles.navText, currentView === 'Inbox' && { color: '#FFD700' }]}>💬 Inbox</Text></TouchableOpacity>
             <TouchableOpacity style={styles.navBtn} onPress={() => setCurrentView('Profile')}><Text style={[styles.navText, currentView === 'Profile' && { color: '#FFD700' }]}>👤 Profile</Text></TouchableOpacity>
           </View>
 
@@ -472,7 +519,7 @@ const styles = StyleSheet.create({
   
   workspace: { flex: 1, backgroundColor: '#0D0D0C' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  sectionHeader: { color: '#8E8E8A', fontSize: 11, fontWeight: '800', letterSpacing: 1, margin: 12 },
+  sectionHeader: { color: '#8E8E8A', fontSize: 11, fontWeight: '800', letterSpacing: 1, margin: 16 },
 
   appBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#262624' },
   logo: { color: '#FFFFFF', fontSize: 20, fontWeight: '900', letterSpacing: 1 },
@@ -483,19 +530,10 @@ const styles = StyleSheet.create({
   whiteBold: { color: '#FFFFFF', fontWeight: '700' },
   greyText: { color: '#8E8E8A', fontSize: 13 },
 
-  tabs: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#262624' },
-  tab: { flex: 1, alignItems: 'center', padding: 14 },
-  tabActive: { borderBottomWidth: 2, borderBottomColor: '#FFD700' },
-  tabText: { color: '#8E8E8A', fontWeight: '600' },
-  tabTextActive: { color: '#FFFFFF' },
-
   postCard: { backgroundColor: '#1A1A18', padding: 16, marginVertical: 6, marginHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: '#262624' },
   postHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   contentText: { color: '#E6E6E6', fontSize: 15, lineHeight: 22 },
   postMedia: { width: '100%', height: 260, borderRadius: 8, marginTop: 12 },
-  actionRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, borderTopWidth: 1, borderTopColor: '#262624', paddingTop: 10 },
-  interactiveActionClick: { flex: 1, alignItems: 'center', paddingVertical: 4 },
-  actionLink: { color: '#8E8E8A', fontSize: 13, fontWeight: '700' },
 
   avatarMini: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#262624' },
   avatarLarge: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#262624', borderWidth: 2, borderColor: '#FFD700' },
@@ -504,17 +542,21 @@ const styles = StyleSheet.create({
   photoLabelUpdate: { color: '#00B074', fontWeight: '700', fontSize: 12, marginTop: 8, textAlign: 'center' },
 
   discoverUserCard: { backgroundColor: '#1A1A18', padding: 16, borderRadius: 16, marginHorizontal: 12, marginVertical: 8, alignItems: 'center', borderWidth: 1, borderColor: '#262624' },
-  cardButtonRow: { flexDirection: 'row', marginTop: 12, width: '100%' },
-  waveBtn: { flex: 1, backgroundColor: '#00B074', padding: 10, borderRadius: 8, alignItems: 'center' },
+  inboxUserRow: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#1A1A18', backgroundColor: '#0D0D0C' },
 
-  badgeLabelContainer: { backgroundColor: '#262624', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
-  badgeTextLayout: { color: '#FFD700', fontSize: 11, fontWeight: '700' },
+  msgBubble: { padding: 12, borderRadius: 12, marginVertical: 4, maxWidth: '75%' },
+  msgMe: { backgroundColor: '#00B074', alignSelf: 'flex-end' },
+  msgThem: { backgroundColor: '#262624', alignSelf: 'flex-start' },
+  chatMediaImg: { width: 180, height: 140, borderRadius: 8, marginTop: 6 },
+  chatInputLayout: { flexDirection: 'row', padding: 12, backgroundColor: '#1A1A18', alignItems: 'center' },
+  chatTextInput: { flex: 1, backgroundColor: '#0D0D0C', color: '#FFFFFF', padding: 12, borderRadius: 20, paddingHorizontal: 16 },
+  chatSendBtn: { marginLeft: 12, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#00B074', borderRadius: 20 },
 
   sheet: { flex: 1, backgroundColor: '#0D0D0C' },
   sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: '#262624', alignItems: 'center' },
   composeInputLayout: { flexDirection: 'row', padding: 16 },
   inputArea: { flex: 1, color: '#FFFFFF', paddingLeft: 12, fontSize: 16, textAlignVertical: 'top' },
-  mediaTray: { padding: 16, alignItems: 'center', borderTopWidth: 1, borderTopColor: '#262624' },
+  mediaTray: { padding: 16, alignItems: 'center', borderTopWidth: 1, borderTopColor: '#262624', backgroundColor: '#1A1A18' },
   mediaTrayText: { color: '#00B074', fontWeight: '700' },
   mediaContainer: { position: 'relative', margin: 16, height: 200 },
   imgPreview: { width: '100%', height: '100%', borderRadius: 8 },
@@ -522,15 +564,10 @@ const styles = StyleSheet.create({
 
   profileHub: { backgroundColor: '#1A1A18', padding: 24, margin: 12, borderRadius: 16, alignItems: 'center', borderWidth: 1, borderColor: '#262624' },
   bioText: { color: '#E6E6E6', textAlign: 'center', marginVertical: 16, lineHeight: 20 },
-  editBtn: { backgroundColor: '#262624', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8 },
+  editBtn: { backgroundColor: '#262624', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8, marginTop: 12 },
   logOutBtn: { paddingVertical: 6, paddingHorizontal: 12, backgroundColor: '#262624', borderRadius: 8 },
   label: { color: '#FFD700', fontSize: 11, fontWeight: '800', marginTop: 16 },
   field: { backgroundColor: '#1A1A18', color: '#FFFFFF', padding: 14, borderRadius: 12, marginTop: 6, borderWidth: 1, borderColor: '#262624', width: '100%' },
-  
-  statusRowPick: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, width: '100%' },
-  statusSelectChip: { flex: 1, padding: 10, backgroundColor: '#1A1A18', borderRadius: 8, alignItems: 'center', marginHorizontal: 4, borderWidth: 1, borderColor: '#262624' },
-  statusSelectChipActive: { backgroundColor: '#FFD700' },
-  chipTxt: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
 
   bottomNav: { flexDirection: 'row', height: 65, borderTopWidth: 1, borderTopColor: '#262624', backgroundColor: '#0D0D0C', paddingBottom: 10 },
   navBtn: { flex: 1, alignItems: 'center', justifyContent: 'center' },
