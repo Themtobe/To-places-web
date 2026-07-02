@@ -27,7 +27,7 @@ export default function App() {
   const [authMode, setAuthMode] = useState('LOGIN'); 
   const [authLoading, setAuthLoading] = useState(false);
   
-  const [currentView, setCurrentView] = useState('Feed'); // Feed, Discovery, Inbox, Profile
+  const [currentView, setCurrentView] = useState('Feed'); 
   const [isComposeVisible, setIsComposeVisible] = useState(false);
   const [isEditProfileVisible, setIsEditProfileVisible] = useState(false);
   const [feedLoading, setFeedLoading] = useState(false);
@@ -83,7 +83,7 @@ export default function App() {
     }
   }, [session, currentView]);
 
-  // Real-time Isolated Message Streamer
+  // Real-time Message Subscription Engine
   useEffect(() => {
     if (!session || !activeChatUser) return;
 
@@ -159,7 +159,40 @@ export default function App() {
     if (data) setChatMessages(data);
   };
 
-  // --- HARDWARE HANDLERS ---
+  // --- HARDWARE HIGH-PERFORMANCE BINARY CONVERTER & UPLOADER ---
+  const uploadImageToStorage = async (base64Data, folder) => {
+    try {
+      const base64Str = base64Data.includes('base64,') ? base64Data.split('base64,')[1] : base64Data;
+      
+      // Convert base64 data stream to safe binary Blob array mapping for cloud storage engine
+      const byteCharacters = atob(base64Str);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: 'image/jpeg' });
+
+      const fileName = `${folder}/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+      
+      // Upload execution pipeline directly to Supabase storage public bucket
+      const { data, error } = await supabase.storage
+        .from('media') 
+        .upload(fileName, blob, { contentType: 'image/jpeg', upsert: true });
+        
+      if (error) throw error;
+
+      const { data: publicUrlData } = supabase.storage
+        .from('media')
+        .getPublicUrl(fileName);
+
+      return publicUrlData.publicUrl;
+    } catch (err) {
+      console.error("Storage bucket transfer error, falling back to data link:", err);
+      return base64Data; 
+    }
+  };
+
   const pickImageHandler = async (target) => {
     Alert.alert(
       'Upload Media',
@@ -208,10 +241,8 @@ export default function App() {
     }
   };
 
-  // --- DELETE CYCLE ENGINE ---
   const promptMessageDeletion = (messageId, senderId) => {
     if (senderId !== session.user.id) return;
-    
     Alert.alert(
       'Delete Message',
       'Are you sure you want to remove this message/photo permanently?',
@@ -232,7 +263,7 @@ export default function App() {
   const promptClearChatHistory = () => {
     Alert.alert(
       'Wipe Entire Chat',
-      `Delete all conversation history with ${activeChatUser?.full_name}? This action cannot be undone.`,
+      `Delete all conversation history with ${activeChatUser?.full_name}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -243,7 +274,6 @@ export default function App() {
               .from('messages')
               .delete()
               .or(`and(sender_id.eq.${session.user.id},receiver_id.eq.${activeChatUser.id}),and(sender_id.eq.${activeChatUser.id},receiver_id.eq.${session.user.id})`);
-            
             if (!error) {
               setChatMessages([]);
               Alert.alert('Cleared', 'Conversation wiped clean.');
@@ -254,7 +284,7 @@ export default function App() {
     );
   };
 
-  // --- CORES ---
+  // --- CORE TRANSACTION HANDLERS ---
   const handleAuthentication = async () => {
     if (!authEmail || !authPassword) {
       Alert.alert('Verification Halt', 'All fields are required.');
@@ -287,59 +317,83 @@ export default function App() {
 
   const handlePublishPost = async () => {
     if (newPostText.trim() === '' && !attachedMedia) return;
-    const { error } = await supabase
-      .from('posts')
-      .insert([{ user_id: session.user.id, content: newPostText, media_url: attachedMedia }]);
+    setFeedLoading(true);
+    try {
+      let finalMediaUrl = null;
+      if (attachedMedia) {
+        finalMediaUrl = await uploadImageToStorage(attachedMedia, 'posts');
+      }
 
-    if (error) {
-      Alert.alert('Transaction Refused', error.message);
-    } else {
+      const { error } = await supabase
+        .from('posts')
+        .insert([{ user_id: session.user.id, content: newPostText, media_url: finalMediaUrl }]);
+
+      if (error) throw error;
+
       setNewPostText('');
       setAttachedMedia(null);
       setIsComposeVisible(false);
       fetchCloudTimeline();
+    } catch (err) {
+      Alert.alert('Transaction Refused', err.message);
+    } finally {
+      setFeedLoading(false);
     }
   };
 
   const saveProfileChanges = async () => {
-    const { error } = await supabase
-      .from('profiles')
-      .update({ full_name: inputName, bio: inputBio, avatar_url: inputAvatar })
-      .eq('id', session.user.id);
+    try {
+      let finalAvatarUrl = inputAvatar;
+      // Only upload if it's a new localized file/base64 capture sequence
+      if (inputAvatar && inputAvatar.startsWith('data:image')) {
+        finalAvatarUrl = await uploadImageToStorage(inputAvatar, 'avatars');
+      }
 
-    if (!error) {
-      setUserProfile(prev => ({ ...prev, name: inputName, bio: inputBio, avatar: inputAvatar }));
+      const { error } = await supabase
+        .from('profiles')
+        .update({ full_name: inputName, bio: inputBio, avatar_url: finalAvatarUrl })
+        .eq('id', session.user.id);
+
+      if (error) throw error;
+
+      setUserProfile(prev => ({ ...prev, name: inputName, bio: inputBio, avatar: finalAvatarUrl }));
       setIsEditProfileVisible(false);
       fetchCloudTimeline();
-    } else {
-      Alert.alert('Update Failure', error.message);
+    } catch (err) {
+      Alert.alert('Update Failure', err.message);
     }
   };
 
   const handleSendTextMessage = async () => {
     if (typedMessage.trim() === '' && !chatAttachedMedia) return;
-    
-    const { error } = await supabase
-      .from('messages')
-      .insert([{
-        sender_id: session.user.id,
-        receiver_id: activeChatUser.id,
-        content: typedMessage.trim() !== '' ? typedMessage : '📷 Shared Media Transmission',
-        media_url: chatAttachedMedia
-      }]);
+    try {
+      let finalChatMediaUrl = null;
+      if (chatAttachedMedia) {
+        finalChatMediaUrl = await uploadImageToStorage(chatAttachedMedia, 'chats');
+      }
 
-    if (!error) {
+      const { error } = await supabase
+        .from('messages')
+        .insert([{
+          sender_id: session.user.id,
+          receiver_id: activeChatUser.id,
+          content: typedMessage.trim() !== '' ? typedMessage : '📷 Shared Media Transmission',
+          media_url: finalChatMediaUrl
+        }]);
+
+      if (error) throw error;
+
       setTypedMessage('');
       setChatAttachedMedia(null);
       fetchChatHistory();
-    } else {
-      Alert.alert('Message Fail', error.message);
+    } catch (err) {
+      Alert.alert('Message Fail', err.message);
     }
   };
 
   const renderAvatar = (avatarUrl, name, sizeStyle = styles.avatarMini) => {
     if (avatarUrl && avatarUrl.trim() !== '') {
-      return <Image source={{ uri: avatarUrl }} style={[sizeStyle, { resizeMode: 'contain', backgroundColor: '#1A1A18' }]} />;
+      return <Image source={{ uri: avatarUrl }} style={[sizeStyle, { resizeMode: 'cover', backgroundColor: '#1A1A18' }]} />;
     }
     const letter = name ? name.charAt(0).toUpperCase() : '?';
     return (
@@ -446,7 +500,7 @@ export default function App() {
                       activeOpacity={0.7}
                       style={[styles.msgBubble, isMe ? styles.msgMe : styles.msgThem]}
                     >
-                      {msg.media_url && <Image source={{ uri: msg.media_url }} style={styles.chatMediaImg} resizeMode="contain" />}
+                      {msg.media_url && <Image source={{ uri: msg.media_url }} style={styles.chatMediaImg} resizeMode="cover" />}
                       <Text style={{ color: '#FFFFFF', marginTop: msg.media_url ? 6 : 0 }}>{msg.content}</Text>
                     </TouchableOpacity>
                   );
@@ -488,7 +542,7 @@ export default function App() {
                         </View>
                       </View>
                       <Text style={styles.contentText}>{log.content}</Text>
-                      {log.media && <Image source={{ uri: log.media }} style={styles.postMedia} resizeMode="contain" />}
+                      {log.media && <Image source={{ uri: log.media }} style={styles.postMedia} resizeMode="cover" />}
                     </View>
                   ))}
                 </ScrollView>
@@ -496,7 +550,7 @@ export default function App() {
             </View>
           )}
 
-          {/* DISCOVERY VIEW - RENAMED FROM DISCOVERY INDEX */}
+          {/* DISCOVERY VIEW */}
           {currentView === 'Discovery' && (
             <View style={{ flex: 1 }}>
               <View style={styles.appBar}><Text style={styles.logo}>DISCOVERY</Text></View>
