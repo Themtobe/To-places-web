@@ -54,6 +54,7 @@ export default function App() {
   
   const [inputName, setInputName] = useState('');
   const [inputBio, setInputBio] = useState('');
+  const [inputAvatar, setInputAvatar] = useState('');
 
   // --- LIFECYCLE SYNC OPERATIONS ---
   useEffect(() => {
@@ -82,7 +83,7 @@ export default function App() {
     }
   }, [session, currentView]);
 
-  // Real-time Message Streamer Sync
+  // Real-time Isolated Message Streamer
   useEffect(() => {
     if (!session || !activeChatUser) return;
 
@@ -90,7 +91,7 @@ export default function App() {
 
     const channel = supabase
       .channel('realtime-messages')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
         fetchChatHistory();
       })
       .subscribe();
@@ -112,6 +113,7 @@ export default function App() {
       });
       setInputName(data.full_name || '');
       setInputBio(data.bio || '');
+      setInputAvatar(data.avatar_url || '');
     }
   };
 
@@ -157,7 +159,7 @@ export default function App() {
     if (data) setChatMessages(data);
   };
 
-  // --- HARDWARE CAMERA & IMAGE SELECTION HANDLERS ---
+  // --- HARDWARE HANDLERS ---
   const pickImageHandler = async (target) => {
     Alert.alert(
       'Upload Media',
@@ -176,7 +178,6 @@ export default function App() {
       Alert.alert('Access Denied', 'Camera execution permissions required.');
       return;
     }
-    // Set allowsEditing to true but REMOVED mandatory square aspect boundaries for self-adjusting frames
     let result = await ImagePicker.launchCameraAsync({ quality: 0.7, allowsEditing: true, base64: true });
     if (!result.canceled) {
       const base64Url = `data:image/jpeg;base64,${result.assets[0].base64}`;
@@ -190,7 +191,6 @@ export default function App() {
       Alert.alert('Access Denied', 'Gallery context permissions required.');
       return;
     }
-    // Set allowsEditing to true but REMOVED mandatory square aspect boundaries for self-adjusting frames
     let result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7, allowsEditing: true, base64: true });
     if (!result.canceled) {
       const base64Url = `data:image/jpeg;base64,${result.assets[0].base64}`;
@@ -202,14 +202,59 @@ export default function App() {
     if (target === 'POST') {
       setAttachedMedia(base64Data);
     } else if (target === 'PROFILE') {
-      setUserProfile(prev => ({ ...prev, avatar: base64Data }));
-      await supabase.from('profiles').update({ avatar_url: base64Data }).eq('id', session.user.id);
+      setInputAvatar(base64Data);
     } else if (target === 'CHAT') {
       setChatAttachedMedia(base64Data);
     }
   };
 
-  // --- USER CORE INTERACTION FLOWS ---
+  // --- DELETE CYCLE ENGINE ---
+  const promptMessageDeletion = (messageId, senderId) => {
+    if (senderId !== session.user.id) return;
+    
+    Alert.alert(
+      'Delete Message',
+      'Are you sure you want to remove this message/photo permanently?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: '🗑️ Delete', 
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await supabase.from('messages').delete().eq('id', messageId);
+            if (!error) fetchChatHistory();
+          } 
+        }
+      ]
+    );
+  };
+
+  const promptClearChatHistory = () => {
+    Alert.alert(
+      'Wipe Entire Chat',
+      `Delete all conversation history with ${activeChatUser?.full_name}? This action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: '💥 Clear Thread',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await supabase
+              .from('messages')
+              .delete()
+              .or(`and(sender_id.eq.${session.user.id},receiver_id.eq.${activeChatUser.id}),and(sender_id.eq.${activeChatUser.id},receiver_id.eq.${session.user.id})`);
+            
+            if (!error) {
+              setChatMessages([]);
+              Alert.alert('Cleared', 'Conversation wiped clean.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // --- CORES ---
   const handleAuthentication = async () => {
     if (!authEmail || !authPassword) {
       Alert.alert('Verification Halt', 'All fields are required.');
@@ -259,12 +304,13 @@ export default function App() {
   const saveProfileChanges = async () => {
     const { error } = await supabase
       .from('profiles')
-      .update({ full_name: inputName, bio: inputBio })
+      .update({ full_name: inputName, bio: inputBio, avatar_url: inputAvatar })
       .eq('id', session.user.id);
 
     if (!error) {
-      setUserProfile(prev => ({ ...prev, name: inputName, bio: inputBio }));
+      setUserProfile(prev => ({ ...prev, name: inputName, bio: inputBio, avatar: inputAvatar }));
       setIsEditProfileVisible(false);
+      fetchCloudTimeline();
     } else {
       Alert.alert('Update Failure', error.message);
     }
@@ -293,7 +339,6 @@ export default function App() {
 
   const renderAvatar = (avatarUrl, name, sizeStyle = styles.avatarMini) => {
     if (avatarUrl && avatarUrl.trim() !== '') {
-      // Changed to 'contain' to let full dimensions adjust and fit freely inside frames
       return <Image source={{ uri: avatarUrl }} style={[sizeStyle, { resizeMode: 'contain', backgroundColor: '#1A1A18' }]} />;
     }
     const letter = name ? name.charAt(0).toUpperCase() : '?';
@@ -304,17 +349,14 @@ export default function App() {
     );
   };
 
-  // --- LOG-IN GATE ---
   if (!session) {
     return (
       <SafeAreaView style={styles.authContainer}>
         <View style={styles.authCard}>
           <Text style={styles.mainTitle}>TO <Text style={{color: '#FFD700'}}>PLACES</Text></Text>
           <View style={{ height: 20 }} />
-
           <TextInput style={styles.field} placeholder="Email Address" placeholderTextColor="#8E8E8A" value={authEmail} onChangeText={setAuthEmail} autoCapitalize="none" keyboardType="email-address" />
           <TextInput style={styles.field} placeholder="Password" placeholderTextColor="#8E8E8A" secureTextEntry value={authPassword} onChangeText={setAuthPassword} />
-
           {authLoading ? (
             <ActivityIndicator size="small" color="#FFD700" style={{ marginVertical: 20 }} />
           ) : (
@@ -322,7 +364,6 @@ export default function App() {
               <Text style={styles.btnText}>{authMode === 'LOGIN' ? 'Log In' : 'Register Account'}</Text>
             </TouchableOpacity>
           )}
-
           <TouchableOpacity onPress={() => setAuthMode(authMode === 'LOGIN' ? 'SIGNUP' : 'LOGIN')}>
             <Text style={styles.toggleAuthText}>
               {authMode === 'LOGIN' ? "Don't have an account? Register here" : 'Already have an account? Log In'}
@@ -365,21 +406,19 @@ export default function App() {
           <Modal visible={isEditProfileVisible} animationType="fade">
             <SafeAreaView style={styles.sheet}>
               <View style={styles.sheetHeader}>
-                <TouchableOpacity onPress={() => setIsEditProfileVisible(false)}><Text style={styles.goldActionText}>Cancel</Text></TouchableOpacity>
+                <TouchableOpacity onPress={() => { setIsEditProfileVisible(false); setInputAvatar(userProfile.avatar); }}><Text style={styles.goldActionText}>Cancel</Text></TouchableOpacity>
                 <TouchableOpacity style={styles.greenActionBtn} onPress={saveProfileChanges}><Text style={styles.btnText}>Save</Text></TouchableOpacity>
               </View>
               <ScrollView style={{ padding: 20 }}>
                 <View style={{ alignItems: 'center', marginBottom: 20 }}>
                   <TouchableOpacity onPress={() => pickImageHandler('PROFILE')}>
-                    {renderAvatar(userProfile.avatar, userProfile.name, styles.avatarLarge)}
+                    {renderAvatar(inputAvatar, userProfile.name, styles.avatarLarge)}
                     <Text style={styles.photoLabelUpdate}>Change Identity Image</Text>
                   </TouchableOpacity>
                 </View>
-
-                <Text style={styles.label}>DISPLAY HANDLE RECOGNITION NAME</Text>
+                <Text style={styles.label}>NAME</Text>
                 <TextInput style={styles.field} value={inputName} onChangeText={setInputName} placeholderTextColor="#8E8E8A" />
-
-                <Text style={styles.label}>METADATA BIO DESCRIPTION</Text>
+                <Text style={styles.label}>BIO DESCRIPTION</Text>
                 <TextInput style={[styles.field, { height: 120 }]} value={inputBio} onChangeText={setInputBio} placeholderTextColor="#8E8E8A" multiline />
               </ScrollView>
             </SafeAreaView>
@@ -391,17 +430,25 @@ export default function App() {
               <View style={styles.sheetHeader}>
                 <TouchableOpacity onPress={() => { setActiveChatUser(null); setChatAttachedMedia(null); }}><Text style={styles.goldActionText}>✕ Close</Text></TouchableOpacity>
                 <Text style={styles.whiteBold}>{activeChatUser?.full_name}</Text>
-                <TouchableOpacity onPress={() => pickImageHandler('CHAT')}><Text style={styles.mediaTrayText}>📷 Attach Pic</Text></TouchableOpacity>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <TouchableOpacity onPress={() => pickImageHandler('CHAT')} style={{ marginRight: 15 }}><Text style={styles.mediaTrayText}>📷 Photo</Text></TouchableOpacity>
+                  <TouchableOpacity onPress={promptClearChatHistory}><Text style={{ fontSize: 18 }}>🗑️</Text></TouchableOpacity>
+                </View>
               </View>
               
               <ScrollView style={{ flex: 1, padding: 16 }}>
                 {chatMessages.map(msg => {
                   const isMe = msg.sender_id === session.user.id;
                   return (
-                    <View key={msg.id} style={[styles.msgBubble, isMe ? styles.msgMe : styles.msgThem]}>
+                    <TouchableOpacity 
+                      key={msg.id} 
+                      onLongPress={() => promptMessageDeletion(msg.id, msg.sender_id)}
+                      activeOpacity={0.7}
+                      style={[styles.msgBubble, isMe ? styles.msgMe : styles.msgThem]}
+                    >
                       {msg.media_url && <Image source={{ uri: msg.media_url }} style={styles.chatMediaImg} resizeMode="contain" />}
                       <Text style={{ color: '#FFFFFF', marginTop: msg.media_url ? 6 : 0 }}>{msg.content}</Text>
-                    </View>
+                    </TouchableOpacity>
                   );
                 })}
               </ScrollView>
@@ -414,7 +461,7 @@ export default function App() {
               )}
 
               <View style={styles.chatInputLayout}>
-                <TextInput style={styles.chatTextInput} placeholder="Type secure message..." placeholderTextColor="#8E8E8A" value={typedMessage} onChangeText={setTypedMessage} />
+                <TextInput style={styles.chatTextInput} placeholder="Type message..." placeholderTextColor="#8E8E8A" value={typedMessage} onChangeText={setTypedMessage} />
                 <TouchableOpacity style={styles.chatSendBtn} onPress={handleSendTextMessage}><Text style={styles.btnText}>Send</Text></TouchableOpacity>
               </View>
             </SafeAreaView>
@@ -449,10 +496,10 @@ export default function App() {
             </View>
           )}
 
-          {/* DISCOVERY VIEW */}
+          {/* DISCOVERY VIEW - RENAMED FROM DISCOVERY INDEX */}
           {currentView === 'Discovery' && (
             <View style={{ flex: 1 }}>
-              <View style={styles.appBar}><Text style={styles.logo}>DISCOVERY <Text style={{color: '#FFD700'}}>INDEX</Text></Text></View>
+              <View style={styles.appBar}><Text style={styles.logo}>DISCOVERY</Text></View>
               <ScrollView style={{ padding: 12 }}>
                 {discoverUsers.map(user => (
                   <View key={user.id} style={styles.discoverUserCard}>
@@ -465,10 +512,10 @@ export default function App() {
             </View>
           )}
 
-          {/* GLOBAL INBOX CHANNEL */}
+          {/* INBOX CHANNEL */}
           {currentView === 'Inbox' && (
             <View style={{ flex: 1 }}>
-              <View style={styles.appBar}><Text style={styles.logo}>SECURE <Text style={{color: '#FFD700'}}>INBOX</Text></Text></View>
+              <View style={styles.appBar}><Text style={styles.logo}>INBOX</Text></View>
               <ScrollView style={{ flex: 1 }}>
                 <Text style={styles.sectionHeader}>TAP ON A PROFILE TO INITIATE CHAT CONNECTION</Text>
                 {discoverUsers.map(user => (
@@ -476,7 +523,7 @@ export default function App() {
                     {renderAvatar(user.avatar_url, user.full_name, styles.avatarMini)}
                     <View style={{ marginLeft: 14 }}>
                       <Text style={styles.whiteBold}>{user.full_name || 'Network User'}</Text>
-                      <Text style={styles.greyText}>Click to chat & swap photos</Text>
+                      <Text style={styles.greyText}>Click to open thread & swap media</Text>
                     </View>
                   </TouchableOpacity>
                 ))}
@@ -492,7 +539,7 @@ export default function App() {
                 <TouchableOpacity style={styles.logOutBtn} onPress={handleSignOut}><Text style={styles.redText}>Log Out</Text></TouchableOpacity>
               </View>
               <View style={styles.profileHub}>
-                <TouchableOpacity onPress={() => pickImageHandler('PROFILE')}>
+                <TouchableOpacity onPress={() => setIsEditProfileVisible(true)}>
                   {renderAvatar(userProfile.avatar, userProfile.name, styles.avatarLarge)}
                 </TouchableOpacity>
                 <Text style={[styles.whiteBold, { fontSize: 22, marginTop: 12 }]}>{userProfile.name}</Text>
@@ -503,7 +550,7 @@ export default function App() {
             </View>
           )}
 
-          {/* BOTTOM GLOBAL APP NAVIGATION */}
+          {/* BOTTOM NAVIGATION */}
           <View style={styles.bottomNav}>
             <TouchableOpacity style={styles.navBtn} onPress={() => setCurrentView('Feed')}><Text style={[styles.navText, currentView === 'Feed' && { color: '#FFD700' }]}>🎴 Feed</Text></TouchableOpacity>
             <TouchableOpacity style={styles.navBtn} onPress={() => setCurrentView('Discovery')}><Text style={[styles.navText, currentView === 'Discovery' && { color: '#FFD700' }]}>⚡ Discovery</Text></TouchableOpacity>
@@ -544,7 +591,7 @@ const styles = StyleSheet.create({
   postMedia: { width: '100%', height: 260, borderRadius: 8, marginTop: 12, backgroundColor: '#0D0D0C' },
 
   avatarMini: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#262624', overflow: 'hidden' },
-  avatarLarge: { width: 120, height: 160, borderRadius: 12, backgroundColor: '#1A1A18', borderWidth: 2, borderColor: '#FFD700', overflow: 'hidden' },
+  avatarLarge: { width: 140, height: 180, borderRadius: 12, backgroundColor: '#1A1A18', borderWidth: 2, borderColor: '#FFD700', overflow: 'hidden' },
   avatarFallback: { backgroundColor: '#3A3A36', alignItems: 'center', justifyContent: 'center' },
   avatarFallbackText: { color: '#FFD700', fontWeight: '900', fontSize: 20 },
   photoLabelUpdate: { color: '#00B074', fontWeight: '700', fontSize: 12, marginTop: 8, textAlign: 'center' },
@@ -552,7 +599,7 @@ const styles = StyleSheet.create({
   discoverUserCard: { backgroundColor: '#1A1A18', padding: 16, borderRadius: 16, marginHorizontal: 12, marginVertical: 8, alignItems: 'center', borderWidth: 1, borderColor: '#262624' },
   inboxUserRow: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#1A1A18', backgroundColor: '#0D0D0C' },
 
-  msgBubble: { padding: 12, borderRadius: 12, marginVertical: 4, maxWidth: '75%', errorWidth: 100 },
+  msgBubble: { padding: 12, borderRadius: 12, marginVertical: 4, maxWidth: '75%' },
   msgMe: { backgroundColor: '#00B074', alignSelf: 'flex-end' },
   msgThem: { backgroundColor: '#262624', alignSelf: 'flex-start' },
   chatMediaImg: { width: 200, height: 180, borderRadius: 8, backgroundColor: '#0D0D0C' },
