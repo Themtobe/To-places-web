@@ -42,7 +42,7 @@ export default function App() {
   const [activeChatUser, setActiveChatUser] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
   const [typedMessage, setTypedMessage] = useState('');
-  const [inboxLoading, setInboxLoading] = useState(false);
+  const [chatAttachedMedia, setChatAttachedMedia] = useState(null);
 
   const [userProfile, setUserProfile] = useState({
     id: '',
@@ -90,7 +90,7 @@ export default function App() {
 
     const channel = supabase
       .channel('realtime-messages')
-      .on('postgres_changes', { event: 'INSERT', scheme: 'public', table: 'messages' }, () => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
         fetchChatHistory();
       })
       .subscribe();
@@ -176,7 +176,8 @@ export default function App() {
       Alert.alert('Access Denied', 'Camera execution permissions required.');
       return;
     }
-    let result = await ImagePicker.launchCameraAsync({ quality: 0.6, allowsEditing: true, aspect: [4, 3], base64: true });
+    // Set allowsEditing to true but REMOVED mandatory square aspect boundaries for self-adjusting frames
+    let result = await ImagePicker.launchCameraAsync({ quality: 0.7, allowsEditing: true, base64: true });
     if (!result.canceled) {
       const base64Url = `data:image/jpeg;base64,${result.assets[0].base64}`;
       processSelectedImage(base64Url, target);
@@ -189,7 +190,8 @@ export default function App() {
       Alert.alert('Access Denied', 'Gallery context permissions required.');
       return;
     }
-    let result = await ImagePicker.launchImageLibraryAsync({ quality: 0.6, allowsEditing: true, aspect: [4, 3], base64: true });
+    // Set allowsEditing to true but REMOVED mandatory square aspect boundaries for self-adjusting frames
+    let result = await ImagePicker.launchImageLibraryAsync({ quality: 0.7, allowsEditing: true, base64: true });
     if (!result.canceled) {
       const base64Url = `data:image/jpeg;base64,${result.assets[0].base64}`;
       processSelectedImage(base64Url, target);
@@ -203,14 +205,7 @@ export default function App() {
       setUserProfile(prev => ({ ...prev, avatar: base64Data }));
       await supabase.from('profiles').update({ avatar_url: base64Data }).eq('id', session.user.id);
     } else if (target === 'CHAT') {
-      // Instant image transmit configuration inside text channels
-      await supabase.from('messages').insert([{
-        sender_id: session.user.id,
-        receiver_id: activeChatUser.id,
-        content: '📷 Sent a photo',
-        media_url: base64Data
-      }]);
-      fetchChatHistory();
+      setChatAttachedMedia(base64Data);
     }
   };
 
@@ -276,24 +271,30 @@ export default function App() {
   };
 
   const handleSendTextMessage = async () => {
-    if (typedMessage.trim() === '') return;
+    if (typedMessage.trim() === '' && !chatAttachedMedia) return;
+    
     const { error } = await supabase
       .from('messages')
       .insert([{
         sender_id: session.user.id,
         receiver_id: activeChatUser.id,
-        content: typedMessage
+        content: typedMessage.trim() !== '' ? typedMessage : '📷 Shared Media Transmission',
+        media_url: chatAttachedMedia
       }]);
 
     if (!error) {
       setTypedMessage('');
+      setChatAttachedMedia(null);
       fetchChatHistory();
+    } else {
+      Alert.alert('Message Fail', error.message);
     }
   };
 
   const renderAvatar = (avatarUrl, name, sizeStyle = styles.avatarMini) => {
     if (avatarUrl && avatarUrl.trim() !== '') {
-      return <Image source={{ uri: avatarUrl }} style={sizeStyle} />;
+      // Changed to 'contain' to let full dimensions adjust and fit freely inside frames
+      return <Image source={{ uri: avatarUrl }} style={[sizeStyle, { resizeMode: 'contain', backgroundColor: '#1A1A18' }]} />;
     }
     const letter = name ? name.charAt(0).toUpperCase() : '?';
     return (
@@ -350,7 +351,7 @@ export default function App() {
               </View>
               {attachedMedia && (
                 <View style={styles.mediaContainer}>
-                  <Image source={{ uri: attachedMedia }} style={styles.imgPreview} />
+                  <Image source={{ uri: attachedMedia }} style={styles.imgPreview} resizeMode="contain" />
                   <TouchableOpacity style={styles.removeMediaBtn} onPress={() => setAttachedMedia(null)}><Text style={styles.btnText}>✕ Delete</Text></TouchableOpacity>
                 </View>
               )}
@@ -384,13 +385,13 @@ export default function App() {
             </SafeAreaView>
           </Modal>
 
-          {/* CHAT INBOX DRAWER INTERFACE */}
+          {/* CHAT INBOX INTERFACE */}
           <Modal visible={activeChatUser !== null} animationType="slide">
             <SafeAreaView style={styles.sheet}>
               <View style={styles.sheetHeader}>
-                <TouchableOpacity onPress={() => setActiveChatUser(null)}><Text style={styles.goldActionText}>✕ Close</Text></TouchableOpacity>
+                <TouchableOpacity onPress={() => { setActiveChatUser(null); setChatAttachedMedia(null); }}><Text style={styles.goldActionText}>✕ Close</Text></TouchableOpacity>
                 <Text style={styles.whiteBold}>{activeChatUser?.full_name}</Text>
-                <TouchableOpacity onPress={() => pickImageHandler('CHAT')}><Text style={styles.mediaTrayText}>📷 Send Pic</Text></TouchableOpacity>
+                <TouchableOpacity onPress={() => pickImageHandler('CHAT')}><Text style={styles.mediaTrayText}>📷 Attach Pic</Text></TouchableOpacity>
               </View>
               
               <ScrollView style={{ flex: 1, padding: 16 }}>
@@ -398,15 +399,22 @@ export default function App() {
                   const isMe = msg.sender_id === session.user.id;
                   return (
                     <View key={msg.id} style={[styles.msgBubble, isMe ? styles.msgMe : styles.msgThem]}>
-                      <Text style={{ color: '#FFFFFF' }}>{msg.content}</Text>
-                      {msg.media_url && <Image source={{ uri: msg.media_url }} style={styles.chatMediaImg} />}
+                      {msg.media_url && <Image source={{ uri: msg.media_url }} style={styles.chatMediaImg} resizeMode="contain" />}
+                      <Text style={{ color: '#FFFFFF', marginTop: msg.media_url ? 6 : 0 }}>{msg.content}</Text>
                     </View>
                   );
                 })}
               </ScrollView>
 
+              {chatAttachedMedia && (
+                <View style={styles.chatAttachedPreviewLayout}>
+                  <Image source={{ uri: chatAttachedMedia }} style={styles.chatPreviewThumbnail} resizeMode="contain" />
+                  <TouchableOpacity style={styles.chatRemoveImgBtn} onPress={() => setChatAttachedMedia(null)}><Text style={{color: '#FFF', fontSize: 11}}>✕ Remove</Text></TouchableOpacity>
+                </View>
+              )}
+
               <View style={styles.chatInputLayout}>
-                <TextInput style={styles.chatTextInput} placeholder="Type secure chat transmission..." placeholderTextColor="#8E8E8A" value={typedMessage} onChangeText={setTypedMessage} />
+                <TextInput style={styles.chatTextInput} placeholder="Type secure message..." placeholderTextColor="#8E8E8A" value={typedMessage} onChangeText={setTypedMessage} />
                 <TouchableOpacity style={styles.chatSendBtn} onPress={handleSendTextMessage}><Text style={styles.btnText}>Send</Text></TouchableOpacity>
               </View>
             </SafeAreaView>
@@ -433,7 +441,7 @@ export default function App() {
                         </View>
                       </View>
                       <Text style={styles.contentText}>{log.content}</Text>
-                      {log.media && <Image source={{ uri: log.media }} style={styles.postMedia} resizeMode="cover" />}
+                      {log.media && <Image source={{ uri: log.media }} style={styles.postMedia} resizeMode="contain" />}
                     </View>
                   ))}
                 </ScrollView>
@@ -441,7 +449,7 @@ export default function App() {
             </View>
           )}
 
-          {/* DISCOVERY VIEW (RENAME MATRIX) */}
+          {/* DISCOVERY VIEW */}
           {currentView === 'Discovery' && (
             <View style={{ flex: 1 }}>
               <View style={styles.appBar}><Text style={styles.logo}>DISCOVERY <Text style={{color: '#FFD700'}}>INDEX</Text></Text></View>
@@ -468,7 +476,7 @@ export default function App() {
                     {renderAvatar(user.avatar_url, user.full_name, styles.avatarMini)}
                     <View style={{ marginLeft: 14 }}>
                       <Text style={styles.whiteBold}>{user.full_name || 'Network User'}</Text>
-                      <Text style={styles.greyText}>Click to connect & send images</Text>
+                      <Text style={styles.greyText}>Click to chat & swap photos</Text>
                     </View>
                   </TouchableOpacity>
                 ))}
@@ -476,7 +484,7 @@ export default function App() {
             </View>
           )}
 
-          {/* PROFILE CONNECTOR HUBS */}
+          {/* PROFILE HUBS */}
           {currentView === 'Profile' && (
             <View style={{ flex: 1 }}>
               <View style={styles.appBar}>
@@ -533,10 +541,10 @@ const styles = StyleSheet.create({
   postCard: { backgroundColor: '#1A1A18', padding: 16, marginVertical: 6, marginHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: '#262624' },
   postHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   contentText: { color: '#E6E6E6', fontSize: 15, lineHeight: 22 },
-  postMedia: { width: '100%', height: 260, borderRadius: 8, marginTop: 12 },
+  postMedia: { width: '100%', height: 260, borderRadius: 8, marginTop: 12, backgroundColor: '#0D0D0C' },
 
-  avatarMini: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#262624' },
-  avatarLarge: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#262624', borderWidth: 2, borderColor: '#FFD700' },
+  avatarMini: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#262624', overflow: 'hidden' },
+  avatarLarge: { width: 120, height: 160, borderRadius: 12, backgroundColor: '#1A1A18', borderWidth: 2, borderColor: '#FFD700', overflow: 'hidden' },
   avatarFallback: { backgroundColor: '#3A3A36', alignItems: 'center', justifyContent: 'center' },
   avatarFallbackText: { color: '#FFD700', fontWeight: '900', fontSize: 20 },
   photoLabelUpdate: { color: '#00B074', fontWeight: '700', fontSize: 12, marginTop: 8, textAlign: 'center' },
@@ -544,13 +552,17 @@ const styles = StyleSheet.create({
   discoverUserCard: { backgroundColor: '#1A1A18', padding: 16, borderRadius: 16, marginHorizontal: 12, marginVertical: 8, alignItems: 'center', borderWidth: 1, borderColor: '#262624' },
   inboxUserRow: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#1A1A18', backgroundColor: '#0D0D0C' },
 
-  msgBubble: { padding: 12, borderRadius: 12, marginVertical: 4, maxWidth: '75%' },
+  msgBubble: { padding: 12, borderRadius: 12, marginVertical: 4, maxWidth: '75%', errorWidth: 100 },
   msgMe: { backgroundColor: '#00B074', alignSelf: 'flex-end' },
   msgThem: { backgroundColor: '#262624', alignSelf: 'flex-start' },
-  chatMediaImg: { width: 180, height: 140, borderRadius: 8, marginTop: 6 },
+  chatMediaImg: { width: 200, height: 180, borderRadius: 8, backgroundColor: '#0D0D0C' },
   chatInputLayout: { flexDirection: 'row', padding: 12, backgroundColor: '#1A1A18', alignItems: 'center' },
   chatTextInput: { flex: 1, backgroundColor: '#0D0D0C', color: '#FFFFFF', padding: 12, borderRadius: 20, paddingHorizontal: 16 },
   chatSendBtn: { marginLeft: 12, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#00B074', borderRadius: 20 },
+  
+  chatAttachedPreviewLayout: { flexDirection: 'row', backgroundColor: '#1A1A18', padding: 10, alignItems: 'center', borderTopWidth: 1, borderTopColor: '#262624' },
+  chatPreviewThumbnail: { width: 60, height: 60, borderRadius: 6, backgroundColor: '#0D0D0C' },
+  chatRemoveImgBtn: { marginLeft: 14, backgroundColor: '#FF5A5F', padding: 6, borderRadius: 8 },
 
   sheet: { flex: 1, backgroundColor: '#0D0D0C' },
   sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: '#262624', alignItems: 'center' },
